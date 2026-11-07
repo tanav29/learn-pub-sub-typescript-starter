@@ -1,13 +1,20 @@
 import amqp from "amqplib";
-import { clientWelcome, closeInput, commandStatus, getInput, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
+import type { ConfirmChannel } from "amqplib";
+import type { GameLog } from "../internal/gamelogic/logs.js";
+import { clientWelcome, closeInput, commandStatus, getInput, getMaliciousLog, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { commandMove } from "../internal/gamelogic/move.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { SimpleQueueType } from "../internal/pubsub/consume.js";
-import { publishJSON } from "../internal/pubsub/publish.js";
+import { publishJSON, publishMsgPack } from "../internal/pubsub/publish.js";
 import { subscribeJSON } from "../internal/pubsub/subscribe.js";
-import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
+import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, GameLogSlug, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
 import { handlerMove, handlerPause, handlerWar } from "./handlers.js";
+
+export function publishGameLog(channel: ConfirmChannel, username: string, message: string): Promise<void> {
+  const log: GameLog = { username, message, currentTime: new Date() };
+  return publishMsgPack(channel, ExchangePerilTopic, `${GameLogSlug}.${username}`, log);
+}
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
@@ -21,7 +28,7 @@ async function main() {
   await subscribeJSON(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient, handlerPause(gameState));
   const moveKey = `${ArmyMovesPrefix}.${username}`;
   await subscribeJSON(conn, ExchangePerilTopic, moveKey, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState, publishChannel));
-  await subscribeJSON(conn, ExchangePerilTopic, WarRecognitionsPrefix, `${WarRecognitionsPrefix}.*`, SimpleQueueType.Durable, handlerWar(gameState));
+  await subscribeJSON(conn, ExchangePerilTopic, WarRecognitionsPrefix, `${WarRecognitionsPrefix}.*`, SimpleQueueType.Durable, handlerWar(gameState, (username, message) => publishGameLog(publishChannel, username, message)));
 
   process.on('SIGINT', () => {
     conn.close();
@@ -54,9 +61,23 @@ async function main() {
         case "help":
           printClientHelp();
           break;
-        case "spam":
-          console.log("Spamming not allowed yet!");
+        case "spam": {
+          const countText = words[1];
+          const count = Number(countText);
+          if (!countText || !/^\d+$/.test(countText) || !Number.isSafeInteger(count) || count < 1) {
+            console.error("Usage: spam <positive integer>");
+            break;
+          }
+          try {
+            for (let i = 0; i < count; i++) {
+              await publishGameLog(publishChannel, username, getMaliciousLog());
+            }
+            console.log(`Published ${count} game logs.`);
+          } catch (error) {
+            console.error("Failed to publish game log:", error);
+          }
           break;
+        }
         case "quit":
           printQuit();
           return;

@@ -36,16 +36,26 @@ export function handlerMove(gs: GameState, channel: ConfirmChannel): (move: Army
   };
 }
 
-export function handlerWar(gs: GameState): (war: RecognitionOfWar) => Promise<AckType> {
+export function handlerWar(gs: GameState, publishLog: (username: string, message: string) => Promise<void>): (war: RecognitionOfWar) => Promise<AckType> {
   return async (war) => {
-    const outcome = handleWar(gs, war).result;
+    const outcome = handleWar(gs, war);
     process.stdout.write("> ");
-    switch (outcome) {
+    switch (outcome.result) {
       case WarOutcome.NotInvolved: return AckType.NackRequeue;
       case WarOutcome.NoUnits: return AckType.NackDiscard;
       case WarOutcome.OpponentWon:
       case WarOutcome.YouWon:
-      case WarOutcome.Draw: return AckType.Ack;
+      case WarOutcome.Draw:
+        try {
+          const message = outcome.result === WarOutcome.Draw
+            ? `A war between ${outcome.attacker} and ${outcome.defender} resulted in a draw`
+            : `${outcome.winner} won a war against ${outcome.loser}`;
+          await publishLog(war.attacker.username, message);
+          return AckType.Ack;
+        } catch (error) {
+          console.error("Failed to publish game log:", error);
+          return AckType.NackRequeue;
+        }
       default:
         console.error("Unexpected war outcome:", outcome);
         return AckType.NackDiscard;
