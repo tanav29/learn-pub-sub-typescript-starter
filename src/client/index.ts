@@ -3,8 +3,11 @@ import { clientWelcome, closeInput, commandStatus, getInput, printClientHelp, pr
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { commandMove } from "../internal/gamelogic/move.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
-import { declareAndBind, SimpleQueueType } from "../internal/pubsub/consume.js";
-import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
+import { SimpleQueueType } from "../internal/pubsub/consume.js";
+import { publishJSON } from "../internal/pubsub/publish.js";
+import { subscribeJSON } from "../internal/pubsub/subscribe.js";
+import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey } from "../internal/routing/routing.js";
+import { handlerMove, handlerPause } from "./handlers.js";
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
@@ -13,8 +16,11 @@ async function main() {
   console.log("Starting Peril client...");
 
   const username = await clientWelcome();
-  await declareAndBind(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient);
   const gameState = new GameState(username);
+  await subscribeJSON(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient, handlerPause(gameState));
+  const moveKey = `${ArmyMovesPrefix}.${username}`;
+  await subscribeJSON(conn, ExchangePerilTopic, moveKey, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState));
+  const publishChannel = await conn.createConfirmChannel();
 
   process.on('SIGINT', () => {
     conn.close();
@@ -31,7 +37,11 @@ async function main() {
         case "move":
           try {
             if (words[0] === "spawn") commandSpawn(gameState, words);
-            else commandMove(gameState, words);
+            else {
+              const move = commandMove(gameState, words);
+              await publishJSON(publishChannel, ExchangePerilTopic, moveKey, move);
+              console.log("Move published successfully.");
+            }
           } catch (err) {
             if (err instanceof Error) console.error(err.message);
             else throw err;
