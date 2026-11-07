@@ -6,8 +6,8 @@ import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { SimpleQueueType } from "../internal/pubsub/consume.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
 import { subscribeJSON } from "../internal/pubsub/subscribe.js";
-import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey } from "../internal/routing/routing.js";
-import { handlerMove, handlerPause } from "./handlers.js";
+import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
+import { handlerMove, handlerPause, handlerWar } from "./handlers.js";
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
@@ -17,10 +17,11 @@ async function main() {
 
   const username = await clientWelcome();
   const gameState = new GameState(username);
+  const publishChannel = await conn.createConfirmChannel();
   await subscribeJSON(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient, handlerPause(gameState));
   const moveKey = `${ArmyMovesPrefix}.${username}`;
-  await subscribeJSON(conn, ExchangePerilTopic, moveKey, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState));
-  const publishChannel = await conn.createConfirmChannel();
+  await subscribeJSON(conn, ExchangePerilTopic, moveKey, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState, publishChannel));
+  await subscribeJSON(conn, ExchangePerilTopic, WarRecognitionsPrefix, `${WarRecognitionsPrefix}.*`, SimpleQueueType.Durable, handlerWar(gameState));
 
   process.on('SIGINT', () => {
     conn.close();
