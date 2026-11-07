@@ -6,6 +6,10 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
+export function closeInput(): void {
+  rl.close();
+}
+
 export function printClientHelp(): void {
   console.log("Possible commands:");
   console.log("* move <location> <unitID> <unitID> <unitID>...");

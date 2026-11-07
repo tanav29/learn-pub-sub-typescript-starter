@@ -1,12 +1,14 @@
 import amqp from "amqplib";
 import { getInput, printServerHelp } from "../internal/gamelogic/gamelogic.js";
 import type { PlayingState } from "../internal/gamelogic/gamestate.js";
+import { declareAndBind, SimpleQueueType } from "../internal/pubsub/consume.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
-import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
+import { ExchangePerilDirect, ExchangePerilTopic, GameLogSlug, PauseKey } from "../internal/routing/routing.js";
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
   const conn = await amqp.connect(rabbitConnString);
+  await declareAndBind(conn, ExchangePerilTopic, GameLogSlug, `${GameLogSlug}.*`, SimpleQueueType.Durable);
   const channel = await conn.createConfirmChannel();
   const state: PlayingState = { isPaused: true };
   await publishJSON(channel, ExchangePerilDirect, PauseKey, state);
